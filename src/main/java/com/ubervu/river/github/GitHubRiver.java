@@ -39,7 +39,8 @@ public class GitHubRiver extends AbstractRiverComponent implements River {
 
     private final Client client;
     private final String index;
-    private final String repository;
+    private final String repositories_str;
+    private final String[] repositories;
     private final String owner;
     private final int interval;
     private String password;
@@ -59,8 +60,9 @@ public class GitHubRiver extends AbstractRiverComponent implements River {
         // get settings
         Map<String, Object> githubSettings = (Map<String, Object>) settings.settings().get("github");
         owner = XContentMapValues.nodeStringValue(githubSettings.get("owner"), null);
-        repository = XContentMapValues.nodeStringValue(githubSettings.get("repository"), null);
-        index = String.format("%s&%s", owner, repository);
+        repositories_str = XContentMapValues.nodeStringValue(githubSettings.get("repositories"), "");
+        repositories = repositories_str.split(",");
+        index = String.format("github-%s", owner);
         interval = XContentMapValues.nodeIntegerValue(githubSettings.get("interval"), 3600);
 
         // auth (optional)
@@ -113,8 +115,14 @@ public class GitHubRiver extends AbstractRiverComponent implements River {
             InputStream input = null;
             try {
                 input = conn.getInputStream();
+            } catch (java.io.FileNotFoundException e) {
+                logger.info("404 - Nothing to see here", e);
+                return;
             } catch (IOException e) {
-                logger.info("API rate reached, will try later.");
+                logger.info("API rate reached, will try later", e);
+                try {
+                    Thread.sleep(1000); // needs milliseconds
+                } catch (InterruptedException ee) {}
                 return;
             }
             JsonStreamParser jsp = new JsonStreamParser(new InputStreamReader(input));
@@ -242,9 +250,9 @@ public class GitHubRiver extends AbstractRiverComponent implements River {
             request.setRequestProperty("Authorization", "Basic " + encoded);
         }
 
-        private void getData(String fmt, String type) {
+        private void getData(String fmt, String type, String repo) {
             try {
-                URL url = new URL(String.format(fmt, owner, repository));
+                URL url = new URL(String.format(fmt, owner, repo));
                 URLConnection response = url.openConnection();
                 addAuthHeader(response);
                 indexResponse(response, type);
@@ -270,30 +278,51 @@ public class GitHubRiver extends AbstractRiverComponent implements River {
         @Override
         public void run() {
             while (isRunning) {
-                getData("https://api.github.com/repos/%s/%s/events?per_page=1000", "event");
-                getData("https://api.github.com/repos/%s/%s/issues?per_page=1000", "issue");
-                getData("https://api.github.com/repos/%s/%s/issues?state=closed&per_page=1000", "issue");
-
-                // delete pull req data - we are only storing open pull reqs
-                // and when a pull request is closed we have no way of knowing;
-                // this is why we have to delete them and reindex "fresh" ones
-                deleteByType("PullRequestData");
-                getData("https://api.github.com/repos/%s/%s/pulls", "pullreq");
-
-                // same for milestones
                 deleteByType("MilestoneData");
-                getData("https://api.github.com/repos/%s/%s/milestones?per_page=1000", "milestone");
-
-                // collaborators
+                deleteByType("PullRequestData");
                 deleteByType("CollaboratorData");
-                getData("https://api.github.com/repos/%s/%s/collaborators?per_page=1000", "collaborator");
-
-                // and for labels - they have IDs based on the MD5 of the contents, so
-                // if a property changes, we get a "new" document
                 deleteByType("LabelData");
-                getData("https://api.github.com/repos/%s/%s/labels?per_page=1000", "label");
+                for (String repo : repositories) {
+                    getData("https://api.github.com/repos/%s/%s/events?per_page=1000", "event", repo);
+                    try {
+                        Thread.sleep(1000); // needs milliseconds
+                    } catch (InterruptedException e) {}
+                    getData("https://api.github.com/repos/%s/%s/issues?per_page=1000", "issue", repo);
+                    try {
+                        Thread.sleep(1000); // needs milliseconds
+                    } catch (InterruptedException e) {}
+                    getData("https://api.github.com/repos/%s/%s/issues?state=closed&per_page=1000", "issue", repo);
+                    try {
+                        Thread.sleep(1000); // needs milliseconds
+                    } catch (InterruptedException e) {}
 
+                    // delete pull req data - we are only storing open pull reqs
+                    // and when a pull request is closed we have no way of knowing;
+                    // this is why we have to delete them and reindex "fresh" ones
+                    getData("https://api.github.com/repos/%s/%s/pulls", "pullreq", repo);
+                    try {
+                        Thread.sleep(1000); // needs milliseconds
+                    } catch (InterruptedException e) {}
 
+                    // same for milestones
+                    getData("https://api.github.com/repos/%s/%s/milestones?per_page=1000", "milestone", repo);
+                    try {
+                        Thread.sleep(1000); // needs milliseconds
+                    } catch (InterruptedException e) {}
+
+                    // collaborators
+                    getData("https://api.github.com/repos/%s/%s/collaborators?per_page=1000", "collaborator", repo);
+                    try {
+                        Thread.sleep(1000); // needs milliseconds
+                    } catch (InterruptedException e) {}
+
+                    // and for labels - they have IDs based on the MD5 of the contents, so
+                    // if a property changes, we get a "new" document
+                    getData("https://api.github.com/repos/%s/%s/labels?per_page=1000", "label", repo);
+                    try {
+                        Thread.sleep(1000); // needs milliseconds
+                    } catch (InterruptedException e) {}
+                }
                 try {
                     Thread.sleep(interval * 1000); // needs milliseconds
                 } catch (InterruptedException e) {}

@@ -31,7 +31,7 @@ curl -XPUT localhost:9200/_river/gh_river/_meta -d '{
     "type": "github",
     "github": {
         "owner": "gabrielfalcao",
-        "repository": "lettuce",
+        "repositories": "comma,seperated,repository,list",
         "interval": 3600,
         "authentication": {
             "username": "MYUSER", # or token
@@ -53,8 +53,8 @@ curl -XDELETE localhost:9200/_river/gh_river
 
 ##Indexes and types
 
-The data will be stored in an index of format "%s&%s" % (owner, repo), i.e.
-`gabrielfalcao&lettuce`.
+The data will be stored in an index of format "github-%s" % (owner), i.e.
+`github-gabrielfalcao`.
 
 For every API event type, there will be an elasticsearch type of the same name -
 i.e. `ForkEvent`.
